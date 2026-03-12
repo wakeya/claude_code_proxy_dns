@@ -1,93 +1,238 @@
-# Claude Code Proxy Dns
+# Claude Code 透明代理
 
+让 Claude Code 误以为在与官方 API 通信的透明代理服务。
 
+## 功能特性
 
-## Getting started
+- 透明代理所有 Claude Code API 请求
+- **多供应商管理**：支持配置多个 API 供应商，灵活切换
+- **模型映射**：自动将请求模型名转换为供应商支持的模型（如 claude-sonnet-4 → glm-5）
+- 自动生成 CA 证书（10年有效期）
+- 前端配置页面管理供应商和模型映射
+- 密码保护配置页面
+- Docker 单容器部署
+- 热更新配置无需重启
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## 快速开始
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+### 1. 使用 Docker 部署
 
-## Add your files
+**方式一：使用 docker build（推荐）**
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+```bash
+# 克隆项目
+git clone <repo-url>
+cd claude_code_proxy_dns
+
+# 构建镜像
+docker build -t claude_code_proxy_dns .
+
+# 运行容器
+docker run -d \
+  --name claude_code_proxy_dns \
+  -p 443:443 \
+  -p 8442:8442 \
+  -v ./data:/app/data \
+  -e ADMIN_PASSWORD=admin123 \
+  --cap-add NET_BIND_SERVICE \
+  claude_code_proxy_dns
+
+# 查看日志获取配置提示
+docker logs claude_code_proxy_dns
+```
+
+**方式二：使用 docker-compose**
+
+```bash
+# 克隆项目
+git clone <repo-url>
+cd claude_code_proxy_dns
+
+# 安装 docker-compose-plugin（如果未安装）
+sudo apt-get install docker-compose-plugin
+
+# 启动服务
+docker compose up -d
+
+# 查看日志获取配置提示
+docker logs claude_code_proxy_dns
+```
+
+### 2. 测试构建和验证
+
+```bash
+# 1. 测试构建镜像
+docker compose build
+
+# 2. 查看构建的镜像
+docker images | grep claude_code_proxy_dns
+
+# 3. 启动服务
+docker compose up -d
+
+# 4. 查看服务日志
+docker compose logs -f
+
+# 5. 验证服务是否正常运行
+curl -k https://localhost:8442
+
+# 6. 查看容器状态
+docker compose ps
+```
+
+### 3. 安装 CA 证书
+
+代理使用自签名 CA 证书，需要在客户端机器上安装信任。
+
+**方式一：设置环境变量（推荐）**
+
+```bash
+# 将 ca.crt 路径添加到环境变量
+echo 'export NODE_EXTRA_CA_CERTS=/path/to/data/ca.crt' >> ~/.bashrc
+source ~/.bashrc
+```
+
+**方式二：系统级别安装证书**
+
+**macOS：**
+
+```bash
+# 安装证书到系统钥匙串
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ./data/ca.crt
+```
+
+**Linux (Ubuntu/Debian)：**
+
+```bash
+# 复制证书到系统证书目录
+sudo cp ./data/ca.crt /usr/local/share/ca-certificates/
+
+# 更新证书库
+sudo update-ca-certificates
+
+# 如果看到 "skipping duplicate certificate" 警告，说明证书已安装，无需担心
+```
+
+### 4. 配置系统
+
+```bash
+# 添加 hosts 映射（将 api.anthropic.com 指向代理服务器）
+echo "127.0.0.1 api.anthropic.com" | sudo tee -a /etc/hosts
+```
+
+### 5. 访问配置页面
+
+打开浏览器访问: `https://localhost:8442`
+
+默认密码: `admin123`
+
+## 配置说明
+
+### 端口权限
+
+代理服务需要绑定 443 端口（HTTPS 默认端口），这是一个特权端口（< 1024），需要特殊权限。
+
+**Docker 部署：**
+
+`docker-compose.yml` 已配置 `cap_add: NET_BIND_SERVICE`，允许容器内进程绑定特权端口：
+
+```yaml
+cap_add:
+  - NET_BIND_SERVICE
+```
+
+**直接运行（非 Docker）：**
+
+需要授予二进制文件绑定特权端口的能力：
+
+```bash
+# 方式一：使用 setcap（推荐）
+sudo setcap 'cap_net_bind_service=+ep' ./claude_code_proxy_dns
+
+# 方式二：使用 sudo 运行
+sudo ./claude_code_proxy_dns -data ./data
+```
+
+**注意：** 不推荐修改为非特权端口（如 8443），因为：
+- 客户端请求的是 `https://api.anthropic.com`，默认使用 443 端口
+- 通过 hosts 文件将域名解析到 127.0.0.1，但无法改变端口号
+- 如果代理监听非 443 端口，客户端请求会失败
+
+如果必须使用非特权端口，需要：
+```bash
+# 使用 iptables 将 443 端口转发到 8443
+sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 8443
+sudo iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443
+```
+
+### 环境变量
+
+| 环境变量 | 说明 | 默认值 |
+|---------|------|--------|
+| ADMIN_PASSWORD | 管理密码 | admin123 |
+
+### 供应商配置
+
+在前端配置页面添加供应商：
+
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| 名称 | 供应商显示名称 | 阿里云 DashScope |
+| API 地址 | 供应商的 API 端点 | https://dashscope.aliyuncs.com/api/v1/anthropic |
+| API Token | 认证密钥 | sk-xxx |
+| 模型映射 | 客户端模型 → 供应商模型 | claude-sonnet-4 → qwen-max |
+
+### 客户端配置
+
+客户端 `~/.claude/settings.json` 配置示例：
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+    "ANTHROPIC_MODEL": "claude-sonnet-4"
+  }
+}
+```
+
+代理会自动将 `claude-sonnet-4` 转换为供应商配置的模型（如 `glm-5`）。
+
+## 端口说明
+
+| 端口 | 用途 |
+|------|------|
+| 443 | 代理服务入口 |
+| 8442 | 配置页面 |
+
+## 项目结构
 
 ```
-cd existing_repo
-git remote add origin http://git.wakeya.top:56080/wakeya/claude_code_proxy_dns.git
-git branch -M main
-git push -uf origin main
+claude_code_proxy_dns/
+├── cmd/server/          # 应用入口
+├── internal/
+│   ├── config/          # 配置管理
+│   ├── cert/            # 证书管理
+│   ├── proxy/           # 代理服务
+│   ├── admin/           # 配置服务
+│   └── frontend/        # 前端页面
+├── data/                # 数据目录
+├── Dockerfile
+└── docker-compose.yml
 ```
 
-## Integrate with your tools
+## 开发
 
-- [ ] [Set up project integrations](http://git.wakeya.top:56080/wakeya/claude_code_proxy_dns/-/settings/integrations)
+```bash
+# 运行测试
+make test
 
-## Collaborate with your team
+# 本地运行
+make run
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+# 构建
+make build
+```
 
-## Test and Deploy
+## 许可证
 
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+MIT License

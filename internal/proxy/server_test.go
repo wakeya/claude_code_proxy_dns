@@ -1,10 +1,13 @@
 package proxy
 
 import (
+	"crypto/tls"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"claude_code_proxy_dns/internal/config"
 )
 
 func TestProxyHandler(t *testing.T) {
@@ -21,13 +24,21 @@ func TestProxyHandler(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	// 创建代理配置
-	cfg := &Config{
+	// 创建配置存储
+	cfg := &config.Config{
 		BackendURL: backend.URL,
+	}
+	store := config.NewMockStore(cfg)
+
+	// 创建 transport
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: false,
+		},
 	}
 
 	// 创建代理处理器
-	handler := NewHandler(cfg)
+	handler := NewHandler(store, transport)
 
 	// 创建测试请求
 	req := httptest.NewRequest("POST", "/v1/messages", nil)
@@ -60,11 +71,19 @@ func TestProxyBackendError(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := &Config{
+	cfg := &config.Config{
 		BackendURL: backend.URL,
 	}
+	store := config.NewMockStore(cfg)
 
-	handler := NewHandler(cfg)
+	// 创建 transport
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: false,
+		},
+	}
+
+	handler := NewHandler(store, transport)
 
 	req := httptest.NewRequest("POST", "/v1/messages", nil)
 	rec := httptest.NewRecorder()

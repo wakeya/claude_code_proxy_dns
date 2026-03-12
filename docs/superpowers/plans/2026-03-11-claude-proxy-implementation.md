@@ -130,7 +130,7 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.BackendURL != "https://maas-api.ai-yuanjing.com/openapi/compatible-mode" {
+	if cfg.BackendURL != "https://open.bigmodel.cn/api/anthropic" {
 		t.Errorf("expected default backend URL, got %s", cfg.BackendURL)
 	}
 

@@ -7,14 +7,23 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"claude_code_proxy_dns/internal/config"
 )
+
+// StatsProvider 统计数据提供者接口
+type StatsProvider interface {
+	Stats() (total int64, last time.Time, uptime time.Duration)
+}
 
 // Server 配置服务
 type Server struct {
-	config    *AdminConfig
-	auth      *Auth
-	server    *http.Server
-	startTime time.Time
+	config        *AdminConfig
+	auth          *Auth
+	server        *http.Server
+	startTime     time.Time
+	configStore   config.ConfigStore
+	statsProvider StatsProvider
 }
 
 // AdminConfig 配置服务配置
@@ -26,11 +35,13 @@ type AdminConfig struct {
 }
 
 // NewServer 创建配置服务
-func NewServer(cfg *AdminConfig) *Server {
+func NewServer(cfg *AdminConfig, configStore config.ConfigStore, statsProvider StatsProvider) *Server {
 	return &Server{
-		config:    cfg,
-		auth:      NewAuth(cfg.Password),
-		startTime: time.Now(),
+		config:        cfg,
+		auth:          NewAuth(cfg.Password),
+		startTime:     time.Now(),
+		configStore:   configStore,
+		statsProvider: statsProvider,
 	}
 }
 
@@ -40,7 +51,7 @@ func (s *Server) Start(addr string, frontendFS embed.FS) error {
 	mux := http.NewServeMux()
 
 	// 静态文件
-	staticFS, _ := fs.Sub(frontendFS, "internal/frontend/dist")
+	staticFS, _ := fs.Sub(frontendFS, "dist")
 	fileServer := http.FileServer(http.FS(staticFS))
 	mux.Handle("/", s.authMiddleware(fileServer))
 
@@ -51,6 +62,11 @@ func (s *Server) Start(addr string, frontendFS embed.FS) error {
 	mux.HandleFunc("/api/status", s.authMiddlewareFunc(s.handleStatus))
 	mux.HandleFunc("/api/certificates", s.authMiddlewareFunc(s.handleCertificates))
 	mux.HandleFunc("/api/config/test", s.authMiddlewareFunc(s.handleTestBackend))
+
+	// 供应商 API 路由
+	mux.HandleFunc("/api/providers", s.authMiddlewareFunc(s.handleProviders))
+	mux.HandleFunc("/api/providers/test", s.authMiddlewareFunc(s.handleTestProvider))
+	mux.HandleFunc("/api/providers/", s.authMiddlewareFunc(s.handleProviderRoutes))
 
 	s.server = &http.Server{
 		Addr:         addr,
@@ -66,6 +82,9 @@ func (s *Server) Start(addr string, frontendFS embed.FS) error {
 
 // Stop 停止配置服务
 func (s *Server) Stop(ctx context.Context) error {
+	// 停止 session 清理 goroutine
+	s.auth.Close()
+
 	if s.server != nil {
 		return s.server.Shutdown(ctx)
 	}

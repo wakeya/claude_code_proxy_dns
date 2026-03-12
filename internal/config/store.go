@@ -6,10 +6,19 @@ import (
 	"path/filepath"
 )
 
+// ConfigStore 配置存储接口
+type ConfigStore interface {
+	Load() (*Config, error)
+	Save(cfg *Config) error
+}
+
 // Store 配置存储
 type Store struct {
 	path string
 }
+
+// 确保 Store 实现 ConfigStore 接口
+var _ ConfigStore = (*Store)(nil)
 
 // NewStore 创建配置存储
 func NewStore(path string) *Store {
@@ -63,4 +72,31 @@ func (s *Store) Save(cfg *Config) error {
 // Path 返回配置文件路径
 func (s *Store) Path() string {
 	return s.path
+}
+
+// MockStore 用于测试的模拟存储
+type MockStore struct {
+	cfg *Config
+}
+
+// 确保 MockStore 实现 ConfigStore 接口
+var _ ConfigStore = (*MockStore)(nil)
+
+// NewMockStore 创建模拟存储
+func NewMockStore(cfg *Config) *MockStore {
+	if cfg == nil {
+		cfg = DefaultConfig()
+	}
+	return &MockStore{cfg: cfg}
+}
+
+// Load 加载配置
+func (s *MockStore) Load() (*Config, error) {
+	return s.cfg, nil
+}
+
+// Save 保存配置
+func (s *MockStore) Save(cfg *Config) error {
+	s.cfg = cfg
+	return nil
 }

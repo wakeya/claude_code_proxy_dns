@@ -7,6 +7,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -44,7 +45,8 @@ func (m *Manager) GenerateServerCert(caCertDER []byte, caKey *rsa.PrivateKey) ([
 			Organization: []string{"Claude Proxy"},
 			CommonName:   "api.anthropic.com",
 		},
-		DNSNames:    []string{"api.anthropic.com"},
+		DNSNames:    []string{"api.anthropic.com", "localhost"},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
 		NotBefore:   time.Now(),
 		NotAfter:    time.Now().AddDate(serverValidYears, 0, 0),
 		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,

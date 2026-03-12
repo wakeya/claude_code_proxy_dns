@@ -1,0 +1,11 @@
+bin/
+data/
+*.test
+*.out
+.git/
+.github/
+.vscode/
+.idea/
+*.md
+!README.md
+docs/

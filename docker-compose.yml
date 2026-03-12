@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  claude_code_proxy_dns:
+    build: .
+    container_name: claude_code_proxy_dns
+    ports:
+      - "443:443"
+      - "8442:8442"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+    restart: unless-stopped
+    cap_add:
+      - NET_BIND_SERVICE

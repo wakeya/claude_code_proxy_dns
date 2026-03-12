@@ -2,7 +2,6 @@ package admin
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"sync"
 	"time"
@@ -22,18 +21,24 @@ type Auth struct {
 	maxAttempts     int
 	lockDuration    time.Duration
 	lockedUntil     time.Time
+
+	// Session 清理
+	stopCleanup chan struct{}
 }
 
 // NewAuth 创建认证管理器
 func NewAuth(password string) *Auth {
 	hash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	return &Auth{
+	auth := &Auth{
 		passwordHash:    hash,
 		sessions:        make(map[string]time.Time),
 		sessionDuration: 24 * time.Hour,
 		maxAttempts:     5,
 		lockDuration:    5 * time.Minute,
+		stopCleanup:     make(chan struct{}),
 	}
+	go auth.cleanupExpiredSessions()
+	return auth
 }
 
 // NewAuthWithConfig 创建带配置的认证管理器
@@ -134,7 +139,29 @@ func (a *Auth) SetPassword(password string) error {
 	return nil
 }
 
-// constantTimeCompare 常量时间比较
-func constantTimeCompare(a, b string) bool {
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+// Close 停止清理 goroutine
+func (a *Auth) Close() {
+	close(a.stopCleanup)
+}
+
+// cleanupExpiredSessions 定期清理过期 session
+func (a *Auth) cleanupExpiredSessions() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			a.mu.Lock()
+			now := time.Now()
+			for token, expiry := range a.sessions {
+				if now.After(expiry) {
+					delete(a.sessions, token)
+				}
+			}
+			a.mu.Unlock()
+		case <-a.stopCleanup:
+			return
+		}
+	}
 }

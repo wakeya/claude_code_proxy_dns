@@ -7,18 +7,15 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
-)
 
-// Config 代理配置
-type Config struct {
-	BackendURL string
-}
+	"claude_code_proxy_dns/internal/config"
+)
 
 // Server 代理服务器
 type Server struct {
-	config    *Config
-	server    *http.Server
-	transport *http.Transport
+	configStore config.ConfigStore
+	server      *http.Server
+	transport   *http.Transport
 
 	// 统计
 	requestsTotal atomic.Int64
@@ -27,10 +24,10 @@ type Server struct {
 }
 
 // NewServer 创建代理服务器
-func NewServer(cfg *Config) *Server {
+func NewServer(store config.ConfigStore) *Server {
 	return &Server{
-		config:    cfg,
-		startTime: time.Now(),
+		configStore: store,
+		startTime:   time.Now(),
 		transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: false,
@@ -44,13 +41,13 @@ func NewServer(cfg *Config) *Server {
 
 // Start 启动代理服务器
 func (s *Server) Start(addr string, certFile, keyFile string) error {
-	handler := NewHandler(s.config)
+	handler := NewHandler(s.configStore, s.transport)
 
 	s.server = &http.Server{
 		Addr:         addr,
 		Handler:      s.withStats(handler),
-		ReadTimeout:  60 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		ReadTimeout:  5 * time.Minute,  // AI API 请求可能需要较长时间
+		WriteTimeout: 10 * time.Minute, // 流式响应可能需要较长时间
 		IdleTimeout:  120 * time.Second,
 	}
 

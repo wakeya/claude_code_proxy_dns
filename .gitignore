@@ -1,0 +1,54 @@
+# --- 依赖 ---
+node_modules/
+.npm/
+
+# --- 构建输出 ---
+dist/
+dist-ssr/
+*.local
+server
+bin/
+!internal/frontend/dist/
+
+# --- 日志 ---
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# --- 编辑器/IDE ---
+.vscode/
+.idea/
+.history/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# --- 测试工具 ---
+.playwright-mcp/
+
+# --- 临时截图/输出 ---
+*.png
+!docs/**/*.png
+
+# --- 操作系统 ---
+.DS_Store
+Thumbs.db
+
+# --- 环境变量 (包含敏感信息) ---
+.env
+.env.*
+!.env.example
+
+# --- 临时文件 ---
+tmp/
+coverage/
+coverage.out
+
+# --- Claude Code 临时文件 ---
+tmpclaude-*-cwd
+
+data/

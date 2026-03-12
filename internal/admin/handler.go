@@ -3,6 +3,8 @@ package admin
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -49,6 +51,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
 		Expires:  time.Now().Add(24 * time.Hour),
 	})
 
@@ -63,12 +66,14 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.auth.InvalidateToken(cookie.Value)
 	}
 
+	// 设置 cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1,
 	})
 
@@ -89,11 +94,24 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // getConfig 获取配置
-func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
-	// TODO: 从配置管理器获取
+func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	if s.configStore == nil {
+		json.NewEncoder(w).Encode(map[string]string{
+			"backend_url": "https://open.bigmodel.cn/api/anthropic",
+		})
+		return
+	}
+
+	cfg, err := s.configStore.Load()
+	if err != nil {
+		http.Error(w, `{"error": "failed to load config"}`, http.StatusInternalServerError)
+		return
+	}
+
 	json.NewEncoder(w).Encode(map[string]string{
-		"backend_url": "https://open.bigmodel.cn/api/anthropic",
+		"backend_url": cfg.BackendURL,
 	})
 }
 
@@ -108,7 +126,27 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: 更新配置管理器
+	// 验证 URL 格式
+	if req.BackendURL != "" {
+		if s.configStore == nil {
+			http.Error(w, `{"error": "config store not available"}`, http.StatusInternalServerError)
+			return
+		}
+		cfg, err := s.configStore.Load()
+		if err != nil {
+			http.Error(w, `{"error": "failed to load config"}`, http.StatusInternalServerError)
+			return
+		}
+		cfg.BackendURL = req.BackendURL
+		if err := cfg.Validate(); err != nil {
+			http.Error(w, `{"error": "invalid URL format"}`, http.StatusBadRequest)
+			return
+		}
+		if err := s.configStore.Save(cfg); err != nil {
+			http.Error(w, `{"error": "failed to save config"}`, http.StatusInternalServerError)
+			return
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -117,11 +155,32 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 // handleStatus 处理状态请求
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	backendURL := "https://open.bigmodel.cn/api/anthropic"
+	if s.configStore != nil {
+		cfg, err := s.configStore.Load()
+		if err == nil {
+			backendURL = cfg.BackendURL
+		}
+	}
+
+	// 获取代理服务器统计数据
+	var requestsTotal int64
+	var lastRequest time.Time
+	var uptime time.Duration
+
+	if s.statsProvider != nil {
+		requestsTotal, lastRequest, uptime = s.statsProvider.Stats()
+	} else {
+		uptime = time.Since(s.startTime)
+	}
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"running":        true,
-		"backend_url":    "https://open.bigmodel.cn/api/anthropic",
-		"uptime":         time.Since(s.startTime).String(),
-		"requests_total": 0,
+		"backend_url":    backendURL,
+		"uptime":         uptime.String(),
+		"requests_total": requestsTotal,
+		"last_request":   lastRequest,
 	})
 }
 
@@ -152,6 +211,38 @@ func (s *Server) handleTestBackend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 解析并验证 URL
+	parsedURL, err := url.Parse(req.BackendURL)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "invalid URL format",
+		})
+		return
+	}
+
+	// 只允许 HTTP/HTTPS 协议
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "only HTTP/HTTPS protocols are allowed",
+		})
+		return
+	}
+
+	// 防止 SSRF：禁止访问内网地址
+	host := parsedURL.Hostname()
+	if isInternalIP(host) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "access to internal addresses is not allowed",
+		})
+		return
+	}
+
 	// 测试连接
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(req.BackendURL)
@@ -159,7 +250,7 @@ func (s *Server) handleTestBackend(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
-			"error":   err.Error(),
+			"error":   "connection failed",
 		})
 		return
 	}
@@ -167,12 +258,49 @@ func (s *Server) handleTestBackend(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":      true,
-		"status_code":  resp.StatusCode,
+		"success":     true,
+		"status_code": resp.StatusCode,
 	})
 }
 
-// SetConfigManager 设置配置管理器
-func (s *Server) SetConfigManager(cm interface{}) {
-	// TODO: 实现配置管理器集成
+// isInternalIP 检查是否为内网地址
+func isInternalIP(host string) bool {
+	// 禁止 localhost 和内网地址
+	internalHosts := []string{
+		"localhost",
+		"127.0.0.1",
+		"0.0.0.0",
+		"::1",
+	}
+
+	for _, h := range internalHosts {
+		if host == h {
+			return true
+		}
+	}
+
+	// 检查内网 IP 段
+	if strings.HasPrefix(host, "10.") ||
+		strings.HasPrefix(host, "192.168.") ||
+		strings.HasPrefix(host, "172.16.") ||
+		strings.HasPrefix(host, "172.17.") ||
+		strings.HasPrefix(host, "172.18.") ||
+		strings.HasPrefix(host, "172.19.") ||
+		strings.HasPrefix(host, "172.20.") ||
+		strings.HasPrefix(host, "172.21.") ||
+		strings.HasPrefix(host, "172.22.") ||
+		strings.HasPrefix(host, "172.23.") ||
+		strings.HasPrefix(host, "172.24.") ||
+		strings.HasPrefix(host, "172.25.") ||
+		strings.HasPrefix(host, "172.26.") ||
+		strings.HasPrefix(host, "172.27.") ||
+		strings.HasPrefix(host, "172.28.") ||
+		strings.HasPrefix(host, "172.29.") ||
+		strings.HasPrefix(host, "172.30.") ||
+		strings.HasPrefix(host, "172.31.") ||
+		strings.HasPrefix(host, "169.254.") {
+		return true
+	}
+
+	return false
 }

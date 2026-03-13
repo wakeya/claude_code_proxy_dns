@@ -35,6 +35,7 @@ docker run -d \
   -v ./data:/app/data \
   -e ADMIN_PASSWORD=admin123 \
   --cap-add NET_BIND_SERVICE \
+  --restart=unless-stopped \
   claude_code_proxy_dns
 
 # 查看日志获取配置提示

@@ -83,9 +83,11 @@ docker compose ps
 
 ### 3. 安装 CA 证书
 
-代理使用自签名 CA 证书，需要在客户端机器上安装信任。
+代理使用自签名 CA 证书，需要在客户端机器上安装信任。有以下三种方式：
 
-**方式一：设置环境变量（推荐）**
+**方式一：指定证书路径（最简单）**
+
+直接通过环境变量指定证书文件路径。
 
 ```bash
 # 将 ca.crt 路径添加到环境变量
@@ -93,26 +95,76 @@ echo 'export NODE_EXTRA_CA_CERTS=/path/to/data/ca.crt' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-**方式二：系统级别安装证书**
+**优点：**
+- 配置简单，一行命令搞定
+- 兼容所有 Node.js 版本
+
+**缺点：**
+- 仅 Node.js 应用使用此证书
+- 项目迁移时需要更新路径
+- 如果证书位置变化，需要修改环境变量
+
+**方式二：系统证书库 + Node.js 系统证书支持（推荐）**
+
+将证书安装到系统证书库，并让 Node.js 读取系统证书。
 
 **macOS：**
 
 ```bash
-# 安装证书到系统钥匙串
+# 1. 安装证书到系统钥匙串
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ./data/ca.crt
+
+# 2. 设置 Node.js 使用系统证书库（需要 Node.js 16+）
+echo 'export NODE_OPTIONS="--use-system-ca"' >> ~/.bashrc
+source ~/.bashrc
 ```
 
 **Linux (Ubuntu/Debian)：**
 
 ```bash
-# 复制证书到系统证书目录
+# 1. 复制证书到系统证书目录
 sudo cp ./data/ca.crt /usr/local/share/ca-certificates/
 
-# 更新证书库
+# 2. 更新证书库
 sudo update-ca-certificates
 
 # 如果看到 "skipping duplicate certificate" 警告，说明证书已安装，无需担心
+
+# 3. 设置 Node.js 使用系统证书库（需要 Node.js 16+）
+echo 'export NODE_OPTIONS="--use-system-ca"' >> ~/.bashrc
+source ~/.bashrc
 ```
+
+**优点：**
+- 系统级信任，所有应用都能识别证书（curl、wget、浏览器等）
+- Node.js 也使用系统证书库
+- 证书更新后无需修改环境变量路径
+- 多项目环境下配置统一
+
+**注意：**
+- 需要 Node.js 16 或更高版本
+- 仍需配置 `NODE_OPTIONS` 环境变量
+
+**方式三：仅系统级信任（不推荐单独使用）**
+
+仅将证书安装到系统，不配置 Node.js 环境变量。
+
+```bash
+# Linux
+sudo cp ./data/ca.crt /usr/local/share/ca-certificates/
+sudo update-ca-certificates
+
+# macOS
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ./data/ca.crt
+```
+
+**适用场景：**
+- 非 Node.js 应用（curl、wget、浏览器等）
+- 配合方式一使用（系统工具 + Node.js 分别配置）
+
+**注意：**
+- ⚠️ Node.js 默认不会读取系统证书库
+- 需要配合方式一或方式二的 `NODE_OPTIONS` 使用
 
 ### 4. 配置系统
 
